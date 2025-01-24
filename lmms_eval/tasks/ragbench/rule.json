@@ -1,0 +1,26 @@
+{
+    "default": {
+        "role": "Assistant",
+        "prompt": "You will evaluate two answers to the same question based on their quality, accuracy, and effectiveness.\n\nPlease rate the helpfulness, relevance, accuracy, and level of details of their responses. Each assistant receives an overall score on a scale of 1 to 10, where a higher score indicates better overall performance.\n\nPlease first output a single line containing only two values indicating the scores for Assistant 1 and 2, respectively. The two scores are separated by a space.\nIn the subsequent line, please provide a comprehensive explanation of your evaluation, avoiding any potential bias and ensuring that the order in which the responses were presented does not affect your judgment."
+    },
+    "factual": {
+        "role": "Assistant",
+        "prompt": "You will evaluate two answers based on their factual correctness and reliability.\n\nPlease evaluate based on these criteria:\n1. Information Accuracy: Is the information correct and up-to-date?\n2. Source Reliability: Are the sources authoritative and trustworthy?\n3. Factual Completeness: Are all relevant facts included?\n4. Objectivity: Is the information presented without bias?\n\nFor each criterion, choose the better answer (either Answer 1 or Answer 2) and explain why.\n\nPlease first output a single line containing two scores (1-10) for Assistant 1 and 2, separated by a space.\nIn the subsequent line, please provide a comprehensive explanation of your evaluation, avoiding any potential bias and ensuring that the order in which the responses were presented does not affect your judgment."
+    },
+    "reasoning": {
+        "role": "Assistant",
+        "prompt": "You will evaluate two answers based on their logical reasoning and analytical depth.\n\nPlease evaluate based on these criteria:\n1. Logical Coherence: Is the reasoning process clear and logical?\n2. Evidence Quality: Are claims well-supported by evidence?\n3. Analytical Depth: How thorough is the analysis?\n4. Conclusion Validity: Are conclusions well-justified?\n\nFor each criterion, choose the better answer (either Answer 1 or Answer 2) and explain why.\n\nPlease first output a single line containing two scores (1-10) for Assistant 1 and 2, separated by a space.\nIn the subsequent line, please provide a comprehensive explanation of your evaluation, avoiding any potential bias and ensuring that the order in which the responses were presented does not affect your judgment."
+    },
+    "comprehensive": {
+        "role": "Assistant",
+        "prompt": "You will evaluate how thoroughly each answer covers all aspects of the question.\n\nPlease evaluate based on these criteria:\n1. Detail Level: How thoroughly does each answer cover all aspects of the question?\n2. Context Coverage: Are all relevant contexts and backgrounds included?\n3. Depth of Explanation: How well are complex concepts explained?\n4. Information Density: Is the content rich and informative?\n\nFor each criterion, choose the better answer (either Answer 1 or Answer 2) and explain why.\n\nPlease first output a single line containing two scores (1-10) for Assistant 1 and 2, separated by a space.\nIn the subsequent line, please provide a comprehensive explanation of your evaluation, avoiding any potential bias and ensuring that the order in which the responses were presented does not affect your judgment."
+    },
+    "diversity": {
+        "role": "Assistant",
+        "prompt": "You will evaluate how well each answer presents different viewpoints and approaches.\n\nPlease evaluate based on these criteria:\n1. Perspective Range: How many different viewpoints are presented?\n2. Insight Variety: How varied are the insights provided?\n3. Approach Diversity: Are multiple approaches or solutions considered?\n4. Context Breadth: Are different contexts or scenarios explored?\n\nFor each criterion, choose the better answer (either Answer 1 or Answer 2) and explain why.\n\nPlease first output a single line containing two scores (1-10) for Assistant 1 and 2, separated by a space.\nIn the subsequent line, please provide a comprehensive explanation of your evaluation, avoiding any potential bias and ensuring that the order in which the responses were presented does not affect your judgment."
+    },
+    "empowerment": {
+        "role": "Assistant",
+        "prompt": "You will evaluate how effectively each answer helps readers understand and apply the information.\n\nPlease evaluate based on these criteria:\n1. Understanding Enhancement: How well does it help readers grasp the topic?\n2. Decision Support: Does it enable informed decision-making?\n3. Knowledge Transfer: How effectively is knowledge conveyed?\n4. Practical Application: Are practical implications or applications clear?\n\nFor each criterion, choose the better answer (either Answer 1 or Answer 2) and explain why.\n\nPlease first output a single line containing two scores (1-10) for Assistant 1 and 2, separated by a space.\nIn the subsequent line, please provide a comprehensive explanation of your evaluation, avoiding any potential bias and ensuring that the order in which the responses were presented does not affect your judgment."
+    }
+}

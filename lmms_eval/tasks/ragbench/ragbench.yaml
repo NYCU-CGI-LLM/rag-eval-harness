@@ -1,0 +1,43 @@
+dataset_path: cgi-llm/ragbench
+dataset_kwargs:
+  token: True
+task: "ragbench"
+test_split: test
+output_type: generate_until
+doc_to_text: !function utils.ragbench_doc_to_text
+doc_to_target: "reference_answer"
+generation_kwargs:
+  until:
+    - "ASSISTANT:"
+  max_new_tokens: 4096
+  temperature: 0
+  top_p: 1.0
+  num_beams: 1
+  do_sample: false
+process_results: !function utils.ragbench_process_results
+metric_list:
+  - metric: gpt_eval_rag_all
+    aggregation: !function utils.ragbench_all_aggregation
+    higher_is_better: true
+  - metric: gpt_eval_rag_factual
+    aggregation: !function utils.ragbench_factual_aggregation
+    higher_is_better: true
+  - metric: gpt_eval_rag_reasoning
+    aggregation: !function utils.ragbench_reasoning_aggregation
+    higher_is_better: true
+  - metric: gpt_eval_rag_comprehensive
+    aggregation: !function utils.ragbench_comprehensive_aggregation
+    higher_is_better: true
+  - metric: gpt_eval_rag_diversity
+    aggregation: !function utils.ragbench_diversity_aggregation
+    higher_is_better: true
+  - metric: gpt_eval_rag_empowerment
+    aggregation: !function utils.ragbench_empowerment_aggregation
+    higher_is_better: true
+metadata:
+  version: 0.0
+  gpt_eval_model_name: "gpt-4o"
+lmms_eval_specific_kwargs:
+  default:
+    pre_prompt: ""
+    post_prompt: ""
