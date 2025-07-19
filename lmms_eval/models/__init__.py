@@ -20,6 +20,7 @@ AVAILABLE_MODELS = {
     "gemini_api": "GeminiAPI",
     "gpt": "GPT",
     "gpt4v": "GPT4V",
+    "gptqa": "GPTQA",
     "idefics2": "Idefics2",
     "instructblip": "InstructBLIP",
     "internvl": "InternVLChat",
