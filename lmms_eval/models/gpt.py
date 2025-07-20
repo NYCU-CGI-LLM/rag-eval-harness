@@ -92,6 +92,14 @@ class GPT(lmms):
 
         self.device = self.accelerator.device
 
+    @property
+    def rank(self):
+        return self._rank
+
+    @property
+    def world_size(self):
+        return self._world_size
+
     @weave.op()
     def generate_until(self, requests) -> List[str]:
         res = []
@@ -122,6 +130,7 @@ class GPT(lmms):
             payload["max_tokens"] = gen_kwargs["max_new_tokens"]
             payload["temperature"] = gen_kwargs["temperature"]
 
+            response_text = ""  # Initialize response_text
             for attempt in range(5):
                 try:
                     response_data = request_server(self, payload)
@@ -129,16 +138,11 @@ class GPT(lmms):
                     break
 
                 except Exception as e:
-                    try:
-                        error_msg = response_data.json()
-                    except:
-                        error_msg = ""
-
-                    eval_logger.info(f"Attempt {attempt + 1} failed with error: {str(e)}.\nReponse: {error_msg}")
-                    if attempt <= 5:
+                    eval_logger.info(f"Attempt {attempt + 1} failed with error: {str(e)}.\nResponse: {response_data if 'response_data' in locals() else 'No response'}")
+                    if attempt < 4:  # 0, 1, 2, 3 (first 4 attempts)
                         time.sleep(NUM_SECONDS_TO_SLEEP)
                     else:
-                        eval_logger.error(f"All 5 attempts failed. Last error message: {str(e)}.\nResponse: {response_data.json()}")
+                        eval_logger.error(f"All 5 attempts failed. Last error message: {str(e)}.")
                         response_text = ""
 
             res.append(response_text)
