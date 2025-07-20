@@ -1,0 +1,29 @@
+task: "tcmeval_sdt_task1"
+dataset_path: json
+dataset_kwargs:
+  data_files: 
+    train: "lmms_eval/tasks/tcmeval_sdt/tcmeval_sdt_tasks/tcmeval_sdt_train_task1.json"
+test_split: train
+output_type: generate_until
+doc_to_text: !function utils.tcmeval_sdt_task1_doc_to_text
+doc_to_target: !function utils.tcmeval_sdt_task1_doc_to_target
+generation_kwargs:
+  max_new_tokens: 256
+  temperature: 0
+  top_p: 1.0
+  num_beams: 1
+  do_sample: false
+process_results: !function utils.tcmeval_sdt_task1_process_results
+metric_list:
+  - metric: exact_match
+    aggregation: mean
+    higher_is_better: true
+metadata:
+  version: 1.0
+  task_type: "info_extraction"
+  description: "TCM medical record clinical information extraction task using recall-based scoring (S_c = |A ∩ B| / |A|)"
+  scoring_formula: "Recall = intersection_count / expert_annotation_count"
+lmms_eval_specific_kwargs:
+  default:
+    pre_prompt: ""
+    post_prompt: ""

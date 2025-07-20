@@ -1,0 +1,9 @@
+group: tcmeval_sdt
+task:
+  - tcmeval_sdt_task1
+  - tcmeval_sdt_task2
+  - tcmeval_sdt_task3
+  - tcmeval_sdt_task4
+metadata:
+  version: 1.0
+  description: "TCM Evaluation SDT - Complete Traditional Chinese Medicine diagnosis tasks" 
