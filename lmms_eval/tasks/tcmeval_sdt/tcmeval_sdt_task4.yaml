@@ -1,0 +1,29 @@
+task: "tcmeval_sdt_task4"
+dataset_path: json
+dataset_kwargs:
+  data_files: 
+    train: "lmms_eval/tasks/tcmeval_sdt/tcmeval_sdt_tasks/tcmeval_sdt_train_task4.json"
+test_split: train
+output_type: generate_until
+doc_to_text: !function utils.tcmeval_sdt_task4_doc_to_text
+doc_to_target: !function utils.tcmeval_sdt_task4_doc_to_target
+generation_kwargs:
+  max_new_tokens: 128
+  temperature: 0
+  top_p: 1.0
+  num_beams: 1
+  do_sample: false
+process_results: !function utils.tcmeval_sdt_task4_process_results
+metric_list:
+  - metric: rouge_l
+    aggregation: mean
+    higher_is_better: true
+metadata:
+  version: 1.0
+  task_type: "explanatory_summary"
+  description: "TCM explanatory summary task using ROUGE-L scoring"
+  scoring_formula: "ROUGE-L = 2 * precision * recall / (precision + recall)"
+lmms_eval_specific_kwargs:
+  default:
+    pre_prompt: ""
+    post_prompt: "\n\n请直接给出最终辨证结果，格式：辨证：[证候名称]，无需详细分析。"
