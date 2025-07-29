@@ -114,17 +114,41 @@ def parse_multi_choice_response(response, all_choices, index2ans):
 
 def tcm_sd_process_results_multiple_choice(doc, results):
     """Process results for TCM multiple choice questions"""
-    pred = results[0]
+    result = results[0]
+    
+    # Handle different response formats
+    if hasattr(result, 'doc_ids'):
+        # ResponseWithDocIds object
+        pred = str(result).strip()
+        retrieved_doc_ids = result.doc_ids
+    elif isinstance(result, dict):
+        # Legacy dict format
+        pred = result["text"].strip()
+        retrieved_doc_ids = result.get("doc_ids", [])
+    else:
+        # String format
+        pred = result.strip()
+        retrieved_doc_ids = []
+    
     options = doc["options"]
     index2ans, all_choices = get_multi_choice_info(options)
     parsed_pred = parse_multi_choice_response(pred, all_choices, index2ans)
     
+    expected_doc_id = doc.get("expected_doc_id")
+    hit = expected_doc_id in retrieved_doc_ids if expected_doc_id is not None and retrieved_doc_ids else False
+    
     return {
-        "tcm_sd_acc": {
+        "accuracy": {
             "user_id": doc["user_id"],
             "expected_answer": doc["expected_answer"],
             "parsed_pred": parsed_pred,
             "expected_syndrome": doc.get("expected_syndrome", "")
+        },
+        "hit_rate": {
+            "user_id": doc["user_id"],
+            "expected_doc_id": expected_doc_id,
+            "retrieved_doc_ids": retrieved_doc_ids,
+            "hit": hit
         },
         "submission": {doc["user_id"]: pred}
     }
@@ -132,12 +156,36 @@ def tcm_sd_process_results_multiple_choice(doc, results):
 
 def tcm_sd_process_results_direct(doc, results):
     """Process results for TCM direct diagnosis"""
-    pred = results[0].strip()
+    result = results[0]
+    
+    # Handle different response formats
+    if hasattr(result, 'doc_ids'):
+        # ResponseWithDocIds object
+        pred = str(result).strip()
+        retrieved_doc_ids = result.doc_ids
+    elif isinstance(result, dict):
+        # Legacy dict format
+        pred = result["text"].strip()
+        retrieved_doc_ids = result.get("doc_ids", [])
+    else:
+        # String format
+        pred = result.strip()
+        retrieved_doc_ids = []
+    
+    expected_doc_id = doc.get("expected_doc_id")
+    hit = expected_doc_id in retrieved_doc_ids if expected_doc_id is not None and retrieved_doc_ids else False
+    
     return {
-        "tcm_sd_acc": {
+        "accuracy": {
             "user_id": doc["user_id"],
             "expected_answer": doc["expected_answer"],
             "parsed_pred": pred
+        },
+        "hit_rate": {
+            "user_id": doc["user_id"],
+            "expected_doc_id": expected_doc_id,
+            "retrieved_doc_ids": retrieved_doc_ids,
+            "hit": hit
         },
         "submission": {doc["user_id"]: pred}
     }
@@ -145,12 +193,36 @@ def tcm_sd_process_results_direct(doc, results):
 
 def tcm_sd_process_results_rc_five(doc, results):
     """Process results for TCM reading comprehension (five options)"""
-    pred = results[0].strip()
+    result = results[0]
+    
+    # Handle different response formats
+    if hasattr(result, 'doc_ids'):
+        # ResponseWithDocIds object
+        pred = str(result).strip()
+        retrieved_doc_ids = result.doc_ids
+    elif isinstance(result, dict):
+        # Legacy dict format
+        pred = result["text"].strip()
+        retrieved_doc_ids = result.get("doc_ids", [])
+    else:
+        # String format
+        pred = result.strip()
+        retrieved_doc_ids = []
+    
+    expected_doc_id = doc.get("expected_doc_id")
+    hit = expected_doc_id in retrieved_doc_ids if expected_doc_id is not None and retrieved_doc_ids else False
+    
     return {
-        "tcm_sd_acc": {
+        "accuracy": {
             "user_id": doc["user_id"],
             "expected_answer": doc["expected_answer"],
             "parsed_pred": pred
+        },
+        "hit_rate": {
+            "user_id": doc["user_id"],
+            "expected_doc_id": expected_doc_id,
+            "retrieved_doc_ids": retrieved_doc_ids,
+            "hit": hit
         },
         "submission": {doc["user_id"]: pred}
     }
@@ -158,12 +230,36 @@ def tcm_sd_process_results_rc_five(doc, results):
 
 def tcm_sd_process_results_rc_all(doc, results):
     """Process results for TCM reading comprehension (all options)"""
-    pred = results[0].strip()
+    result = results[0]
+    
+    # Handle different response formats
+    if hasattr(result, 'doc_ids'):
+        # ResponseWithDocIds object
+        pred = str(result).strip()
+        retrieved_doc_ids = result.doc_ids
+    elif isinstance(result, dict):
+        # Legacy dict format
+        pred = result["text"].strip()
+        retrieved_doc_ids = result.get("doc_ids", [])
+    else:
+        # String format
+        pred = result.strip()
+        retrieved_doc_ids = []
+    
+    expected_doc_id = doc.get("expected_doc_id")
+    hit = expected_doc_id in retrieved_doc_ids if expected_doc_id is not None and retrieved_doc_ids else False
+    
     return {
-        "tcm_sd_acc": {
+        "accuracy": {
             "user_id": doc["user_id"],
             "expected_answer": doc["expected_answer"],
             "parsed_pred": pred
+        },
+        "hit_rate": {
+            "user_id": doc["user_id"],
+            "expected_doc_id": expected_doc_id,
+            "retrieved_doc_ids": retrieved_doc_ids,
+            "hit": hit
         },
         "submission": {doc["user_id"]: pred}
     }
@@ -208,6 +304,20 @@ def evaluate_tcm_sd_rc_all(samples):
         if sample["expected_answer"] == sample["parsed_pred"]:
             pred_correct += 1
     return {"acc": pred_correct / len(samples) if samples else 0}
+
+
+def evaluate_tcm_sd_hit_rate(samples):
+    """Batch evaluation for TCM hit rate"""
+    total_hits = 0
+    total_samples = 0
+    
+    for sample in samples:
+        if sample.get("expected_doc_id") is not None:  # Only count samples with expected_doc_id
+            total_samples += 1
+            if sample.get("hit", False):
+                total_hits += 1
+    
+    return {"hit_rate": total_hits / total_samples if total_samples > 0 else 0}
 
 
 def tcm_sd_aggregate_results_multiple_choice(results):
@@ -260,3 +370,16 @@ def tcm_sd_aggregate_results_rc_all(results):
     eval_logger.info(f"Accuracy: {accuracy:.4f}")
 
     return accuracy 
+
+
+def tcm_sd_aggregate_results_hit_rate(results):
+    """Aggregate hit rate results for TCM diagnosis"""
+    metric_dict = evaluate_tcm_sd_hit_rate(results)
+    total_samples = len([r for r in results if r.get("expected_doc_id") is not None])
+    hit_rate = metric_dict["hit_rate"]
+    
+    eval_logger.info(f"TCM SD Hit Rate Evaluation Results:")
+    eval_logger.info(f"Total samples with expected_doc_id: {total_samples}")
+    eval_logger.info(f"Hit Rate: {hit_rate:.4f}")
+    
+    return hit_rate 

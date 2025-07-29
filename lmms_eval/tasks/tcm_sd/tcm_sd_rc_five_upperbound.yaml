@@ -16,8 +16,11 @@ generation_kwargs:
   do_sample: false
 process_results: !function utils.tcm_sd_process_results_rc_five
 metric_list:
-  - metric: tcm_sd_acc
+  - metric: accuracy
     aggregation: !function utils.tcm_sd_aggregate_results_rc_five
+    higher_is_better: true
+  - metric: hit_rate
+    aggregation: !function utils.tcm_sd_aggregate_results_hit_rate
     higher_is_better: true
 metadata:
   version: 0.0

@@ -11,6 +11,7 @@ from .utils import (
     tcm_sd_doc_to_text_rc_all,
     tcm_sd_process_results_rc_all,
     tcm_sd_aggregate_results_rc_all,
+    tcm_sd_aggregate_results_hit_rate,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     'tcm_sd_doc_to_text_rc_all',
     'tcm_sd_process_results_rc_all',
     'tcm_sd_aggregate_results_rc_all',
+    'tcm_sd_aggregate_results_hit_rate',
 ] 
