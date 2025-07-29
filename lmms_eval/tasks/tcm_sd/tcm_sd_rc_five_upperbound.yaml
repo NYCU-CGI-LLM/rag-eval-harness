@@ -1,7 +1,7 @@
 dataset_path: json
 dataset_kwargs:
-  data_files: dataset/tcm_sd_test_rc_five.json
-task: tcm_sd_rc_five
+  data_files: lmms_eval/tasks/tcm_sd/dataset/tcm_sd_test_rc_five_upperbound.json
+task: tcm_sd_rc_five_upperbound
 test_split: train
 output_type: generate_until
 doc_to_text: !function utils.tcm_sd_doc_to_text_rc_five

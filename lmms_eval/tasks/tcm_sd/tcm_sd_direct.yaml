@@ -1,6 +1,6 @@
 dataset_path: json
 dataset_kwargs:
-  data_files: /root/projects/auo/rag-eval-harness/dataset/TMC_SD_clean/tcm_sd_test_rc_direct.json
+  data_files: datalmms_eval/tasks/tcm_sd/dataset/tcm_sd_test_rc_direct.json
 task: tcm_sd_direct
 test_split: train
 output_type: generate_until

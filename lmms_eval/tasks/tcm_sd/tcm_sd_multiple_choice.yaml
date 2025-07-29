@@ -1,6 +1,6 @@
 dataset_path: json
 dataset_kwargs:
-  data_files: /root/projects/auo/rag-eval-harness/dataset/TMC_SD_clean/tcm_sd_test_multiple_choice.json
+  data_files: dataset/tcm_sd_test_multiple_choice.json
 task: tcm_sd_multiple_choice
 test_split: train
 output_type: generate_until
