@@ -112,8 +112,10 @@ def parse_multi_choice_response(response, all_choices, index2ans):
     return pred_index
 
 
-def tcm_sd_process_results_multiple_choice(doc, results):
-    """Process results for TCM multiple choice questions"""
+def tcm_sd_process_results_direct(doc, results):
+    """Process results for TCM direct diagnosis"""
+    from lmms_eval.api.metrics import exact_match_hf_evaluate
+    
     result = results[0]
     
     # Handle different response formats
@@ -130,20 +132,20 @@ def tcm_sd_process_results_multiple_choice(doc, results):
         pred = result.strip()
         retrieved_doc_ids = []
     
-    options = doc["options"]
-    index2ans, all_choices = get_multi_choice_info(options)
-    parsed_pred = parse_multi_choice_response(pred, all_choices, index2ans)
+    # Calculate exact_match using built-in function
+    exact_match_result = exact_match_hf_evaluate(
+        predictions=[pred],
+        references=[doc["expected_answer"]],
+        ignore_case=True,
+        ignore_punctuation=True,
+        ignore_numbers=True
+    )
     
     expected_doc_id = doc.get("expected_doc_id")
     hit = expected_doc_id in retrieved_doc_ids if expected_doc_id is not None and retrieved_doc_ids else False
     
     return {
-        "accuracy": {
-            "user_id": doc["user_id"],
-            "expected_answer": doc["expected_answer"],
-            "parsed_pred": parsed_pred,
-            "expected_syndrome": doc.get("expected_syndrome", "")
-        },
+        "exact_match": exact_match_result["exact_match"],
         "hit_rate": {
             "user_id": doc["user_id"],
             "expected_doc_id": expected_doc_id,
@@ -154,8 +156,10 @@ def tcm_sd_process_results_multiple_choice(doc, results):
     }
 
 
-def tcm_sd_process_results_direct(doc, results):
-    """Process results for TCM direct diagnosis"""
+def tcm_sd_process_results_multiple_choice(doc, results):
+    """Process results for TCM multiple choice questions"""
+    from lmms_eval.api.metrics import exact_match_hf_evaluate
+    
     result = results[0]
     
     # Handle different response formats
@@ -171,28 +175,39 @@ def tcm_sd_process_results_direct(doc, results):
         # String format
         pred = result.strip()
         retrieved_doc_ids = []
+        
+    options = doc["options"]
+    index2ans, all_choices = get_multi_choice_info(options)
+    parsed_pred = parse_multi_choice_response(pred, all_choices, index2ans)
+    
+    # Calculate exact_match using built-in function
+    exact_match_result = exact_match_hf_evaluate(
+        predictions=[parsed_pred],
+        references=[doc["expected_answer"]],
+        ignore_case=True,
+        ignore_punctuation=True,
+        ignore_numbers=True
+    )
     
     expected_doc_id = doc.get("expected_doc_id")
     hit = expected_doc_id in retrieved_doc_ids if expected_doc_id is not None and retrieved_doc_ids else False
-    
+        
     return {
-        "accuracy": {
-            "user_id": doc["user_id"],
-            "expected_answer": doc["expected_answer"],
-            "parsed_pred": pred
-        },
+        "exact_match": exact_match_result["exact_match"],
         "hit_rate": {
             "user_id": doc["user_id"],
             "expected_doc_id": expected_doc_id,
             "retrieved_doc_ids": retrieved_doc_ids,
             "hit": hit
         },
-        "submission": {doc["user_id"]: pred}
+        "submission": {doc["user_id"]: parsed_pred}
     }
 
 
 def tcm_sd_process_results_rc_five(doc, results):
     """Process results for TCM reading comprehension (five options)"""
+    from lmms_eval.api.metrics import exact_match_hf_evaluate
+    
     result = results[0]
     
     # Handle different response formats
@@ -209,15 +224,20 @@ def tcm_sd_process_results_rc_five(doc, results):
         pred = result.strip()
         retrieved_doc_ids = []
     
+    # Calculate exact_match using built-in function
+    exact_match_result = exact_match_hf_evaluate(
+        predictions=[pred],
+        references=[doc["expected_answer"]],
+        ignore_case=True,
+        ignore_punctuation=True,
+        ignore_numbers=True
+    )
+    
     expected_doc_id = doc.get("expected_doc_id")
     hit = expected_doc_id in retrieved_doc_ids if expected_doc_id is not None and retrieved_doc_ids else False
     
     return {
-        "accuracy": {
-            "user_id": doc["user_id"],
-            "expected_answer": doc["expected_answer"],
-            "parsed_pred": pred
-        },
+        "exact_match": exact_match_result["exact_match"],
         "hit_rate": {
             "user_id": doc["user_id"],
             "expected_doc_id": expected_doc_id,
@@ -230,6 +250,8 @@ def tcm_sd_process_results_rc_five(doc, results):
 
 def tcm_sd_process_results_rc_all(doc, results):
     """Process results for TCM reading comprehension (all options)"""
+    from lmms_eval.api.metrics import exact_match_hf_evaluate
+    
     result = results[0]
     
     # Handle different response formats
@@ -246,15 +268,20 @@ def tcm_sd_process_results_rc_all(doc, results):
         pred = result.strip()
         retrieved_doc_ids = []
     
+    # Calculate exact_match using built-in function
+    exact_match_result = exact_match_hf_evaluate(
+        predictions=[pred],
+        references=[doc["expected_answer"]],
+        ignore_case=True,
+        ignore_punctuation=True,
+        ignore_numbers=True
+    )
+    
     expected_doc_id = doc.get("expected_doc_id")
     hit = expected_doc_id in retrieved_doc_ids if expected_doc_id is not None and retrieved_doc_ids else False
     
     return {
-        "accuracy": {
-            "user_id": doc["user_id"],
-            "expected_answer": doc["expected_answer"],
-            "parsed_pred": pred
-        },
+        "exact_match": exact_match_result["exact_match"],
         "hit_rate": {
             "user_id": doc["user_id"],
             "expected_doc_id": expected_doc_id,
@@ -270,42 +297,6 @@ def eval_multi_choice(gold_i, pred_i):
     return gold_i == pred_i
 
 
-def evaluate_tcm_sd_multiple_choice(samples):
-    """Batch evaluation for TCM multiple choice questions."""
-    pred_correct = 0
-    for sample in samples:
-        if eval_multi_choice(sample["expected_answer"], sample["parsed_pred"]):
-            pred_correct += 1
-    return {"acc": pred_correct / len(samples) if samples else 0}
-
-
-def evaluate_tcm_sd_direct(samples):
-    """Batch evaluation for TCM direct diagnosis"""
-    pred_correct = 0
-    for sample in samples:
-        if sample["expected_answer"] == sample["parsed_pred"]:
-            pred_correct += 1
-    return {"acc": pred_correct / len(samples) if samples else 0}
-
-
-def evaluate_tcm_sd_rc_five(samples):
-    """Batch evaluation for TCM reading comprehension (five options)"""
-    pred_correct = 0
-    for sample in samples:
-        if sample["expected_answer"] == sample["parsed_pred"]:
-            pred_correct += 1
-    return {"acc": pred_correct / len(samples) if samples else 0}
-
-
-def evaluate_tcm_sd_rc_all(samples):
-    """Batch evaluation for TCM reading comprehension (all options)"""
-    pred_correct = 0
-    for sample in samples:
-        if sample["expected_answer"] == sample["parsed_pred"]:
-            pred_correct += 1
-    return {"acc": pred_correct / len(samples) if samples else 0}
-
-
 def evaluate_tcm_sd_hit_rate(samples):
     """Batch evaluation for TCM hit rate"""
     total_hits = 0
@@ -318,58 +309,6 @@ def evaluate_tcm_sd_hit_rate(samples):
                 total_hits += 1
     
     return {"hit_rate": total_hits / total_samples if total_samples > 0 else 0}
-
-
-def tcm_sd_aggregate_results_multiple_choice(results):
-    """Aggregate results for TCM multiple choice questions"""
-    metric_dict = evaluate_tcm_sd_multiple_choice(results)
-    total_samples = len(results)
-    accuracy = metric_dict["acc"]
-    
-    eval_logger.info(f"TCM SD Multiple Choice Evaluation Results:")
-    eval_logger.info(f"Total samples: {total_samples}")
-    eval_logger.info(f"Accuracy: {accuracy:.4f}")
-    
-    return accuracy
-
-
-def tcm_sd_aggregate_results_direct(results):
-    """Aggregate results for TCM direct diagnosis"""
-    metric_dict = evaluate_tcm_sd_direct(results)
-    total_samples = len(results)
-    accuracy = metric_dict["acc"]
-
-    eval_logger.info(f"TCM SD Direct Diagnosis Evaluation Results:")
-    eval_logger.info(f"Total samples: {total_samples}")
-    eval_logger.info(f"Accuracy: {accuracy:.4f}")
-
-    return accuracy 
-
-
-def tcm_sd_aggregate_results_rc_five(results):
-    """Aggregate results for TCM reading comprehension (five options)"""
-    metric_dict = evaluate_tcm_sd_rc_five(results)
-    total_samples = len(results)
-    accuracy = metric_dict["acc"]
-
-    eval_logger.info(f"TCM SD Reading Comprehension (Five Options) Evaluation Results:")
-    eval_logger.info(f"Total samples: {total_samples}")
-    eval_logger.info(f"Accuracy: {accuracy:.4f}")
-
-    return accuracy 
-
-
-def tcm_sd_aggregate_results_rc_all(results):
-    """Aggregate results for TCM reading comprehension (all options)"""
-    metric_dict = evaluate_tcm_sd_rc_all(results)
-    total_samples = len(results)
-    accuracy = metric_dict["acc"]
-
-    eval_logger.info(f"TCM SD Reading Comprehension (All Options) Evaluation Results:")
-    eval_logger.info(f"Total samples: {total_samples}")
-    eval_logger.info(f"Accuracy: {accuracy:.4f}")
-
-    return accuracy 
 
 
 def tcm_sd_aggregate_results_hit_rate(results):

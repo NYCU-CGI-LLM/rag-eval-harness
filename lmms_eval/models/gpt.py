@@ -22,6 +22,31 @@ class ResponseWithDocIds(str):
         obj = str.__new__(cls, content)
         obj.doc_ids = doc_ids or []
         return obj
+    
+    def __getnewargs__(self):
+        """Ensure that pickling preserves the doc_ids attribute"""
+        return (str(self), getattr(self, 'doc_ids', []))
+    
+    def __copy__(self):
+        """Preserve doc_ids during copy operations"""
+        return ResponseWithDocIds(str(self), getattr(self, 'doc_ids', []))
+    
+    def __deepcopy__(self, memo):
+        """Preserve doc_ids during deepcopy operations"""
+        import copy
+        return ResponseWithDocIds(str(self), copy.deepcopy(getattr(self, 'doc_ids', []), memo))
+    
+    def strip(self, chars=None):
+        """Override strip to maintain doc_ids"""
+        return ResponseWithDocIds(super().strip(chars), getattr(self, 'doc_ids', []))
+    
+    def __str__(self):
+        """Ensure string conversion preserves the object type"""
+        return super().__str__()
+    
+    def __repr__(self):
+        """Custom representation showing both content and doc_ids"""
+        return f"ResponseWithDocIds('{str(self)}', doc_ids={getattr(self, 'doc_ids', [])})"
 
 @weave.op()
 def request_server(self, payload):
@@ -159,9 +184,24 @@ class GPT(lmms):
                     
                     response_text = response_data["choices"][0]["message"]["content"].strip()
                     
-                    # Capture doc_ids from response if available
+                    # Capture doc_ids from response if available - check multiple possible locations
                     if "doc_ids" in response_data:
                         retrieved_doc_ids = response_data["doc_ids"]
+                    elif "retrieved_doc_ids" in response_data:
+                        retrieved_doc_ids = response_data["retrieved_doc_ids"]
+                    elif "metadata" in response_data and "doc_ids" in response_data["metadata"]:
+                        retrieved_doc_ids = response_data["metadata"]["doc_ids"]
+                    elif "usage" in response_data and "doc_ids" in response_data["usage"]:
+                        retrieved_doc_ids = response_data["usage"]["doc_ids"]
+                    else:
+                        # Look for doc_ids in choices
+                        if "choices" in response_data and len(response_data["choices"]) > 0:
+                            choice = response_data["choices"][0]
+                            if "doc_ids" in choice:
+                                retrieved_doc_ids = choice["doc_ids"]
+                            elif "message" in choice and "doc_ids" in choice["message"]:
+                                retrieved_doc_ids = choice["message"]["doc_ids"]
+                    
                     break
 
                 except Exception as e:

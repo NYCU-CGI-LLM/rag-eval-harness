@@ -16,9 +16,12 @@ generation_kwargs:
   do_sample: false
 process_results: !function utils.tcm_sd_process_results_rc_all
 metric_list:
-  - metric: accuracy
-    aggregation: !function utils.tcm_sd_aggregate_results_rc_all
+  - metric: exact_match
+    aggregation: mean
     higher_is_better: true
+    ignore_case: true
+    ignore_punctuation: true
+    ignore_numbers: true
   - metric: hit_rate
     aggregation: !function utils.tcm_sd_aggregate_results_hit_rate
     higher_is_better: true
