@@ -40,14 +40,22 @@ class WandbLogger:
             logger.warning("To use the wandb reporting functionality please install wandb>=0.13.6.\n" "To install the latest version of wandb run `pip install wandb --upgrade`\n" f"{e}")
 
         self.wandb_args: Dict[str, Any] = kwargs
+        self.weave_initialized = False
 
         # initialize a W&B run
         if wandb.run is None:
             self.run = wandb.init(**self.wandb_args)
             
-            import weave
-            weave_args = {"project_name": self.wandb_args["project"]} if "project" in self.wandb_args else {}
-            weave.init(**weave_args)
+            # Initialize weave and return True/False for success
+            try:
+                import weave
+                weave_args = {"project_name": self.wandb_args["project"]} if "project" in self.wandb_args else {}
+                weave.init(**weave_args)
+                self.weave_initialized = True
+                logger.info("Weave initialized successfully")
+            except Exception as e:
+                self.weave_initialized = False
+                logger.warning(f"Failed to initialize weave: {e}")
                 
         else:
             self.run = wandb.run
@@ -70,91 +78,146 @@ class WandbLogger:
 
         return configs
 
-    def _sanitize_results_dict(self) -> Tuple[Dict[str, str], Dict[str, Any]]:
-        """Sanitize the results dictionary."""
-        _results = copy.deepcopy(self.results.get("results", dict()))
-
-        # Remove None from the metric string name
-        tmp_results = copy.deepcopy(_results)
-        for task_name in self.task_names:
-            task_result = tmp_results.get(task_name, dict())
-            for metric_name, metric_value in task_result.items():
-                _metric_name, removed = remove_none_pattern(metric_name)
-                if removed:
-                    _results[task_name][_metric_name] = metric_value
-                    _results[task_name].pop(metric_name)
-
-        # remove string valued keys from the results dict
-        wandb_summary = {}
-        for task in self.task_names:
-            task_result = _results.get(task, dict())
-            for metric_name, metric_value in task_result.items():
-                if isinstance(metric_value, str):
-                    wandb_summary[f"{task}/{metric_name}"] = metric_value
-
-        for summary_metric, summary_value in wandb_summary.items():
-            _task, _summary_metric = summary_metric.split("/")
-            _results[_task].pop(_summary_metric)
-
-        tmp_results = copy.deepcopy(_results)
-        for task_name, task_results in tmp_results.items():
+    def _prepare_results_for_wandb(self) -> Dict[str, Any]:
+        """Prepare complete results for wandb logging, filtering non-numeric values."""
+        results = copy.deepcopy(self.results.get("results", {}))
+        
+        wandb_data = {}
+        
+        # Log results with task prefixes for clarity, but filter out problematic values
+        for task_name, task_results in results.items():
             for metric_name, metric_value in task_results.items():
-                _results[f"{task_name}/{metric_name}"] = metric_value
-                _results[task_name].pop(metric_name)
-        for task in self.task_names:
-            _results.pop(task)
+                # Skip non-metric fields and problematic values
+                if (metric_name == "submission" or 
+                    metric_name == "alias" or
+                    isinstance(metric_value, (list, dict))):
+                    continue
+                
+                # Only include numeric values or convertible strings
+                if isinstance(metric_value, (int, float)):
+                    clean_metric_name, _ = remove_none_pattern(metric_name)
+                    key = f"{task_name}/{clean_metric_name}"
+                    wandb_data[key] = metric_value
+                elif isinstance(metric_value, str):
+                    try:
+                        # Try to convert string to number
+                        numeric_value = float(metric_value)
+                        clean_metric_name, _ = remove_none_pattern(metric_name)
+                        key = f"{task_name}/{clean_metric_name}"
+                        wandb_data[key] = numeric_value
+                    except (ValueError, TypeError):
+                        # Skip non-numeric strings
+                        continue
+        
+        return wandb_data
 
-        return wandb_summary, _results
-
-    def _log_results_as_table(self) -> None:
-        """Generate and log evaluation results as a table to W&B."""
+    def _log_complete_results_table(self, samples: Dict[str, List[Dict[str, Any]]] = None) -> None:
+        """Generate and log complete evaluation results as comprehensive tables to W&B."""
+        import wandb
+        
+        # Create simplified table focused on metrics only
         columns = [
+            "Task",
             "Version",
             "Filter",
             "num_fewshot",
             "Metric",
             "Value",
-            "Stderr",
+            "Stderr"
         ]
-
-        def make_table(columns: List[str], key: str = "results"):
-            import wandb
-
-            table = wandb.Table(columns=columns)
-            results = copy.deepcopy(self.results)
-
-            for k, dic in results.get(key).items():
-                if k in self.group_names and not key == "groups":
+        
+        table = wandb.Table(columns=columns)
+        results = copy.deepcopy(self.results)
+        
+        # Log complete results for better traceability
+        for task_name, task_results in results.get("results", {}).items():
+            if task_name in self.group_names:
+                continue
+                
+            version = results.get("versions", {}).get(task_name, "N/A")
+            n_shot = results.get("n-shot", {}).get(task_name, "N/A")
+            
+            for metric_full, value in task_results.items():
+                metric, _, filter_name = metric_full.partition(",")
+                
+                # Skip non-metric fields
+                if (metric.endswith("_stderr") or 
+                    metric == "alias" or 
+                    metric == "submission" or
+                    isinstance(value, list) or
+                    isinstance(value, dict)):
                     continue
-                version = results.get("versions").get(k)
-                if version == "N/A":
-                    version = None
-                n = results.get("n-shot").get(k)
-
-                for (mf), v in dic.items():
-                    m, _, f = mf.partition(",")
-                    if m.endswith("_stderr"):
+                
+                # Only process numeric metrics
+                if not isinstance(value, (int, float)):
+                    try:
+                        float(value)
+                    except (ValueError, TypeError):
                         continue
-                    if m == "alias":
+                
+                # Get stderr if available
+                stderr_key = f"{metric}_stderr,{filter_name}" if filter_name else f"{metric}_stderr"
+                stderr = task_results.get(stderr_key, "")
+                if stderr and stderr != "N/A" and isinstance(stderr, (int, float)):
+                    stderr = f"{stderr:.4f}"
+                else:
+                    stderr = "N/A"
+                
+                table.add_data(
+                    task_name,
+                    version,
+                    filter_name or "none",
+                    str(n_shot),
+                    metric,
+                    f"{value:.4f}" if isinstance(value, float) else str(value),
+                    stderr
+                )
+        
+        self.run.log({"evaluation/results_summary": table})
+        
+        # Also log groups if available
+        if "groups" in results:
+            group_table = wandb.Table(columns=columns)
+            for group_name, group_results in results.get("groups", {}).items():
+                version = results.get("versions", {}).get(group_name, "N/A")
+                n_shot = results.get("n-shot", {}).get(group_name, "N/A")
+                
+                for metric_full, value in group_results.items():
+                    metric, _, filter_name = metric_full.partition(",")
+                    
+                    # Skip non-metric fields
+                    if (metric.endswith("_stderr") or 
+                        metric == "alias" or 
+                        metric == "submission" or
+                        isinstance(value, list) or
+                        isinstance(value, dict)):
                         continue
 
-                    if m + "_stderr" + "," + f in dic:
-                        se = dic[m + "_stderr" + "," + f]
-                        if se != "N/A":
-                            se = "%.4f" % se
-                        table.add_data(*[k, version, f, n, m, str(v), str(se)])
+                    # Only process numeric metrics
+                    if not isinstance(value, (int, float)):
+                        try:
+                            float(value)
+                        except (ValueError, TypeError):
+                            continue
+                    
+                    stderr_key = f"{metric}_stderr,{filter_name}" if filter_name else f"{metric}_stderr"
+                    stderr = group_results.get(stderr_key, "")
+                    if stderr and stderr != "N/A" and isinstance(stderr, (int, float)):
+                        stderr = f"{stderr:.4f}"
                     else:
-                        table.add_data(*[k, version, f, n, m, str(v), ""])
-
-            return table
-
-        # log the complete eval result to W&B Table
-        table = make_table(["Tasks"] + columns, "results")
-        self.run.log({"evaluation/eval_results": table})
-
-        if "groups" in self.results.keys():
-            table = make_table(["Groups"] + columns, "groups")
-            self.run.log({"evaluation/group_eval_results": table})
+                        stderr = "N/A"
+                    
+                    group_table.add_data(
+                        group_name,
+                        version,
+                        filter_name or "none", 
+                        str(n_shot),
+                        metric,
+                        f"{value:.4f}" if isinstance(value, float) else str(value),
+                        stderr
+                    )
+            
+            self.run.log({"evaluation/group_summary": group_table})
 
     def _log_results_as_artifact(self) -> None:
         """Log results as JSON artifact to W&B."""
@@ -166,89 +229,111 @@ class WandbLogger:
             f.write(dumped)
         self.run.log_artifact(artifact)
 
-    def log_eval_result(self) -> None:
-        """Log evaluation results to W&B."""
+    def log_eval_result(self, samples: Dict[str, List[Dict[str, Any]]] = None) -> None:
+        """Log evaluation results to W&B with complete data for better traceability."""
         # Log configs to wandb
         configs = self._get_config()
         self.run.config.update(configs)
 
-        wandb_summary, self.wandb_results = self._sanitize_results_dict()
-        # update wandb.run.summary with items that were removed
-        self.run.summary.update(wandb_summary)
-        # Log the evaluation metrics to wandb
-        self.run.log(self.wandb_results)
-        # Log the evaluation metrics as W&B Table
-        self._log_results_as_table()
-        # Log the results dict as json to W&B Artifacts
+        # Prepare and log complete results without data loss
+        wandb_data = self._prepare_results_for_wandb()
+        self.run.log(wandb_data)
+        
+        # Log comprehensive results table for problem tracing and answer analysis
+        self._log_complete_results_table()
+        
+        # Log Q&A samples table for better traceability (always log this)
+        if samples:
+            self._log_samples_table(samples)
+        
+        # Log the complete results dict as json to W&B Artifacts for full traceability
         self._log_results_as_artifact()
+        
+        # Log weave initialization status
+        self.run.summary.update({"weave_initialized": self.weave_initialized})
 
     def _generate_dataset(self, data: List[Dict[str, Any]], config: Dict[str, Any]) -> pd.DataFrame:
-        """Generate a dataset from evaluation data.
+        """Generate a simplified dataset from evaluation data keeping all important information.
 
         Args:
             data (List[Dict[str, Any]]): The data to generate a dataset for.
             config (Dict[str, Any]): The configuration of the task.
 
         Returns:
-            pd.DataFrame: A dataframe that is ready to be uploaded to W&B.
+            pd.DataFrame: A dataframe that is ready to be uploaded to W&B with complete information.
         """
-        ids = [x["doc_id"] for x in data]
-        labels = [x["target"] for x in data]
-        instance = [""] * len(ids)
-        resps = [""] * len(ids)
-        filtered_resps = [""] * len(ids)
-        model_outputs = {}
-
-        metrics_list = config["metric_list"]
-        metrics = {}
-        for metric in metrics_list:
-            metric = metric.get("metric")
-            if metric in ["word_perplexity", "byte_perplexity", "bits_per_byte"]:
-                metrics[f"{metric}_loglikelihood"] = [x[metric][0] for x in data]
-                if metric in ["byte_perplexity", "bits_per_byte"]:
-                    metrics[f"{metric}_bytes"] = [x[metric][1] for x in data]
+        # Extract basic information
+        ids = [x.get("doc_id", i) for i, x in enumerate(data)]
+        targets = [str(x.get("target", "")) for x in data]
+        
+        # Extract questions and context
+        questions = []
+        context = []
+        generated_answers = []
+        expected_answers = []
+        
+        for x in data:
+            # Try to extract question from various possible locations
+            question = x.get("question", "")
+            if not question and "arguments" in x and x["arguments"]:
+                question = str(x["arguments"][0][0]) if len(x["arguments"][0]) > 0 else ""
+            questions.append(question[:500])  # Truncate for readability
+            
+            # Extract context
+            ctx = x.get("context", x.get("doc", ""))
+            context.append(str(ctx)[:500])  # Truncate for readability
+            
+            # Extract generated answers
+            generated_answer = x.get("generated_answer", "")
+            if not generated_answer and "resps" in x and x["resps"]:
+                if isinstance(x["resps"][0], list) and len(x["resps"][0]) > 0:
+                    generated_answer = str(x["resps"][0][0])
                 else:
-                    metrics[f"{metric}_words"] = [x[metric][1] for x in data]
-            else:
-                metrics[metric] = [x[metric] for x in data]
-
-        if config["output_type"] == "loglikelihood":
-            instance = [x["arguments"][0][0] for x in data]
-            labels = [x["arguments"][0][1] for x in data]
-            resps = [f'log probability of continuation is {x["resps"][0][0][0]} ' + "\n\n" + "continuation will {} generated with greedy sampling".format("not be" if not x["resps"][0][0][1] else "be") for x in data]
-            filtered_resps = [f'log probability of continuation is {x["filtered_resps"][0][0]} ' + "\n\n" + "continuation will {} generated with greedy sampling".format("not be" if not x["filtered_resps"][0][1] else "be") for x in data]
-        elif config["output_type"] == "multiple_choice":
-            instance = [x["arguments"][0][0] for x in data]
-            choices = ["\n".join([f"{idx}. {y[1]}" for idx, y in enumerate(x["arguments"])]) for x in data]
-            resps = [np.argmax([n[0][0] for n in x["resps"]]) for x in data]
-            filtered_resps = [np.argmax([n[0] for n in x["filtered_resps"]]) for x in data]
-        elif config["output_type"] == "loglikelihood_rolling":
-            instance = [x["arguments"][0][0] for x in data]
-            resps = [x["resps"][0][0] for x in data]
-            filtered_resps = [x["filtered_resps"][0] for x in data]
-        elif config["output_type"] == "generate_until":
-            instance = [x["arguments"][0][0] for x in data]
-            resps = [x["resps"][0][0] for x in data]
-            filtered_resps = [x["filtered_resps"][0] for x in data]
-
-        model_outputs["raw_predictions"] = resps
-        model_outputs["filtered_predictions"] = filtered_resps
-
+                    generated_answer = str(x["resps"][0])
+            generated_answers.append(generated_answer[:500])
+            
+            # Extract expected answers
+            expected_answer = x.get("expected_answer", x.get("target", ""))
+            expected_answers.append(str(expected_answer)[:500])
+        
+        # Create comprehensive dataframe
         df_data = {
-            "id": ids,
-            "data": instance,
+            "doc_id": ids,
+            "question": questions,
+            "context": context,
+            "generated_answer": generated_answers,
+            "expected_answer": expected_answers,
+            "target": targets,
+            "output_type": config.get("output_type", "unknown")
         }
-        if config["output_type"] == "multiple_choice":
-            df_data["choices"] = choices
-
-        tmp_data = {
-            "input_len": [len(x) for x in instance],
-            "labels": labels,
-            "output_type": config["output_type"],
-        }
-        df_data.update(tmp_data)
-        df_data.update(model_outputs)
-        df_data.update(metrics)
+        
+        # Add all metrics without complex processing
+        metrics_list = config.get("metric_list", [])
+        for metric_config in metrics_list:
+            if isinstance(metric_config, dict):
+                metric_name = metric_config.get("metric", "unknown_metric")
+            else:
+                metric_name = str(metric_config)
+            
+            # Extract metric values directly
+            metric_values = []
+            for x in data:
+                if metric_name in x:
+                    value = x[metric_name]
+                    # Handle complex metric values
+                    if isinstance(value, (list, tuple)) and len(value) > 0:
+                        metric_values.append(value[0] if isinstance(value[0], (int, float)) else str(value[0]))
+                    else:
+                        metric_values.append(value)
+                else:
+                    metric_values.append(None)
+            
+            df_data[metric_name] = metric_values
+        
+        # Add raw data for debugging
+        df_data["raw_arguments"] = [str(x.get("arguments", ""))[:200] for x in data]
+        df_data["raw_resps"] = [str(x.get("resps", ""))[:200] for x in data]
+        df_data["filtered_resps"] = [str(x.get("filtered_resps", ""))[:200] for x in data]
 
         return pd.DataFrame(df_data)
 
@@ -268,51 +353,164 @@ class WandbLogger:
         self.run.log_artifact(artifact)
         # artifact.wait()
 
+    def _log_samples_table(self, samples: Dict[str, List[Dict[str, Any]]]) -> None:
+        """Log a dedicated table with questions, generated answers, and expected answers."""
+        import wandb
+        
+        if not samples:
+            logger.warning("Samples is None or empty!")
+            return
+        
+        # Create table specifically for Q&A traceability with correctness
+        qa_columns = [
+            "Task",
+            "Doc_ID", 
+            "Question",
+            "Generated_Answer",
+            "Expected_Answer",
+            "Is_Correct",
+            "Context"
+        ]
+        
+        qa_table = wandb.Table(columns=qa_columns)
+        total_rows_added = 0
+        
+        for task_name, task_samples in samples.items():
+            # Check if task should be skipped
+            if task_name in getattr(self, 'group_names', []):
+                continue
+                
+            if not task_samples:
+                continue
+                
+            # Process all samples
+            for i, sample in enumerate(task_samples):
+                # Extract question
+                question = sample.get("question", "")
+                if not question and "arguments" in sample and sample["arguments"]:
+                    try:
+                        if isinstance(sample["arguments"], list) and len(sample["arguments"]) > 0:
+                            if isinstance(sample["arguments"][0], list) and len(sample["arguments"][0]) > 0:
+                                question = str(sample["arguments"][0][0])
+                            else:
+                                question = str(sample["arguments"][0])
+                    except (IndexError, TypeError) as e:
+                        logger.warning(f"Error extracting question: {e}")
+                        question = ""
+                
+                # Extract generated answer
+                generated_answer = sample.get("generated_answer", "")
+                if not generated_answer and "resps" in sample and sample["resps"]:
+                    try:
+                        if isinstance(sample["resps"], list) and len(sample["resps"]) > 0:
+                            if isinstance(sample["resps"][0], list) and len(sample["resps"][0]) > 0:
+                                generated_answer = str(sample["resps"][0][0])
+                            else:
+                                generated_answer = str(sample["resps"][0])
+                    except (IndexError, TypeError) as e:
+                        logger.warning(f"Error extracting generated_answer: {e}")
+                        generated_answer = ""
+                
+                # Extract expected answer
+                expected_answer = sample.get("expected_answer", sample.get("target", ""))
+                
+                # Extract context
+                context = sample.get("context", sample.get("doc", ""))
+                if isinstance(context, dict):
+                    context = str(context.get("text", context))
+                
+                # Check correctness - compare generated and expected answers
+                is_correct = False
+                if generated_answer and expected_answer:
+                    # Simple string comparison (case-insensitive, stripped)
+                    gen_clean = str(generated_answer).strip().lower()
+                    exp_clean = str(expected_answer).strip().lower()
+                    is_correct = gen_clean == exp_clean
+                    
+                    # For multiple choice, also check if the answer is contained
+                    if not is_correct and len(gen_clean) == 1 and len(exp_clean) == 1:
+                        is_correct = gen_clean == exp_clean
+                    elif not is_correct:
+                        # Check if expected answer is contained in generated answer
+                        is_correct = exp_clean in gen_clean or gen_clean in exp_clean
+                
+                # Also check exact_match from sample if available
+                if "exact_match" in sample:
+                    is_correct = bool(sample["exact_match"])
+                
+                # Ensure all data is valid strings and not None - no truncation
+                raw_doc_id = sample.get("doc_id")
+
+                doc_id = raw_doc_id if raw_doc_id is not None and str(raw_doc_id).strip() else f"{task_name}_{i}"
+                question_str = str(question) if question else "No question"
+                generated_str = str(generated_answer) if generated_answer else "No answer"
+                expected_str = str(expected_answer) if expected_answer else "No target"
+                context_str = str(context) if context else "No context"
+                
+                # Only log doc_id issues for debugging
+                if raw_doc_id is None or not str(raw_doc_id).strip():
+                    logger.warning(f"Sample {i} has empty doc_id: {raw_doc_id}, using fallback: {doc_id}")
+                
+                # Add to table with full content (no truncation)
+                qa_table.add_data(
+                    str(task_name),
+                    str(doc_id),
+                    question_str,
+                    generated_str,
+                    expected_str,
+                    bool(is_correct),
+                    context_str
+                )
+                total_rows_added += 1
+        
+        # Always log this table, even if wandb_log_samples is False
+        self.run.log({"evaluation/qa_samples": qa_table})
+
     def log_eval_samples(self, samples: Dict[str, List[Dict[str, Any]]]) -> None:
-        """Log evaluation samples to W&B.
+        """Log evaluation samples to W&B with complete sample data for better traceability.
 
         Args:
             samples (Dict[str, List[Dict[str, Any]]]): Evaluation samples for each task.
         """
-        task_names: List[str] = [x for x in self.task_names if x not in self.group_names]
+        # Log Q&A table for traceability
+        self._log_samples_table(samples)
+        
+        # Log all tasks directly without complex grouping logic
+        for task_name, task_samples in samples.items():
+            if task_name in self.group_names:
+                continue
+                
+            if not task_samples:
+                continue
+                
+            task_config = self.task_configs.get(task_name, {})
+            
+            # Generate comprehensive dataset with all sample information
+            df = self._generate_dataset(task_samples, task_config)
+            df["task_name"] = task_name
+            
+            # Log the complete sample data as W&B Table for easy analysis
+            self.run.log({f"{task_name}_detailed_samples": df})
 
-        ungrouped_tasks = []
-        tasks_by_groups = {}
-
-        for task_name in task_names:
-            group_names = self.task_configs[task_name].get("group", None)
-            if group_names:
-                if isinstance(group_names, str):
-                    group_names = [group_names]
-
-                for group_name in group_names:
-                    if not tasks_by_groups.get(group_name):
-                        tasks_by_groups[group_name] = [task_name]
-                    else:
-                        tasks_by_groups[group_name].append(task_name)
-            else:
-                ungrouped_tasks.append(task_name)
-
-        for task_name in ungrouped_tasks:
-            eval_preds = samples[task_name]
-
-            # log the samples as a W&B Table
-            df = self._generate_dataset(eval_preds, self.task_configs.get(task_name))
-            self.run.log({f"{task_name}_eval_results": df})
-
-            # log the samples as a json file as W&B Artifact
-            self._log_samples_as_artifact(eval_preds, task_name)
-
-        for group, grouped_tasks in tasks_by_groups.items():
-            grouped_df = pd.DataFrame()
-            for task_name in grouped_tasks:
-                eval_preds = samples[task_name]
-                df = self._generate_dataset(eval_preds, self.task_configs.get(task_name))
-                df["group"] = group
-                df["task"] = task_name
-                grouped_df = pd.concat([grouped_df, df], ignore_index=True)
-
-                # log the samples as a json file as W&B Artifact
-                self._log_samples_as_artifact(eval_preds, task_name)
-
-            self.run.log({f"{group}_eval_results": grouped_df})
+            # Log the raw samples as JSON artifact for full traceability
+            self._log_samples_as_artifact(task_samples, task_name)
+        
+        # Handle groups separately if they exist
+        if hasattr(self, 'group_names') and self.group_names:
+            for group_name in self.group_names:
+                if group_name in samples:
+                    group_samples = samples[group_name]
+                    if group_samples:
+                        group_config = self.task_configs.get(group_name, {})
+                        df = self._generate_dataset(group_samples, group_config)
+                        df["group_name"] = group_name
+                        self.run.log({f"{group_name}_group_samples": df})
+                        self._log_samples_as_artifact(group_samples, f"group_{group_name}")
+                        
+        # Log summary of weave status and samples count
+        sample_summary = {
+            "total_tasks": len(samples),
+            "total_samples": sum(len(task_samples) for task_samples in samples.values()),
+            "weave_status": "initialized" if self.weave_initialized else "failed"
+        }
+        self.run.summary.update(sample_summary)
