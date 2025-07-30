@@ -1,0 +1,7 @@
+group: tcm_sd
+task:
+  - tcm_sd_multiple_choice
+  - tcm_sd_direct
+  - tcm_sd_rc_five
+  - tcm_sd_rc_five_upperbound
+  - tcm_sd_rc_all 

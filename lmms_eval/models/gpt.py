@@ -16,6 +16,38 @@ NUM_SECONDS_TO_SLEEP = 30
 from loguru import logger as eval_logger
 import weave
 
+class ResponseWithDocIds(str):
+    """Custom string class that can store doc_ids while being compatible with string operations"""
+    def __new__(cls, content, doc_ids=None):
+        obj = str.__new__(cls, content)
+        obj.doc_ids = doc_ids or []
+        return obj
+    
+    def __getnewargs__(self):
+        """Ensure that pickling preserves the doc_ids attribute"""
+        return (str(self), getattr(self, 'doc_ids', []))
+    
+    def __copy__(self):
+        """Preserve doc_ids during copy operations"""
+        return ResponseWithDocIds(str(self), getattr(self, 'doc_ids', []))
+    
+    def __deepcopy__(self, memo):
+        """Preserve doc_ids during deepcopy operations"""
+        import copy
+        return ResponseWithDocIds(str(self), copy.deepcopy(getattr(self, 'doc_ids', []), memo))
+    
+    def strip(self, chars=None):
+        """Override strip to maintain doc_ids"""
+        return ResponseWithDocIds(super().strip(chars), getattr(self, 'doc_ids', []))
+    
+    def __str__(self):
+        """Ensure string conversion preserves the object type"""
+        return super().__str__()
+    
+    def __repr__(self):
+        """Custom representation showing both content and doc_ids"""
+        return f"ResponseWithDocIds('{str(self)}', doc_ids={getattr(self, 'doc_ids', [])})"
+
 @weave.op()
 def request_server(self, payload):
     response = url_requests.post(
@@ -24,7 +56,15 @@ def request_server(self, payload):
         json=payload,
         timeout=self.timeout
     )
-    return response.json()
+    
+    # Check if the request was successful
+    if response.status_code != 200:
+        raise Exception(f"HTTP {response.status_code}: {response.text} (URL: {self.api_url})")
+    
+    try:
+        return response.json()
+    except Exception as e:
+        raise Exception(f"Failed to parse JSON response: {e}. Response text: {response.text}")
 
 @register_model("gpt")
 class GPT(lmms):
@@ -92,14 +132,6 @@ class GPT(lmms):
 
         self.device = self.accelerator.device
 
-    @property
-    def rank(self):
-        return self._rank
-
-    @property
-    def world_size(self):
-        return self._world_size
-
     @weave.op()
     def generate_until(self, requests) -> List[str]:
         res = []
@@ -109,9 +141,14 @@ class GPT(lmms):
             if self.continual_mode is True and self.cache_mode == "resume":
                 doc_uuid = f"{task}___{split}___{doc_id}"
                 if doc_uuid in self.response_cache:
-                    response_text = self.response_cache[doc_uuid]
-                    if response_text:
-                        res.append(response_text)
+                    cached_response = self.response_cache[doc_uuid]
+                    if cached_response:
+                        # Handle cached response that might be string or dict with doc_ids
+                        if isinstance(cached_response, dict) and "doc_ids" in cached_response:
+                            cached_with_doc_ids = ResponseWithDocIds(cached_response["text"], cached_response["doc_ids"])
+                            res.append(cached_with_doc_ids)
+                        else:
+                            res.append(cached_response)  # Legacy string format or ResponseWithDocIds
                         pbar.update(1)
                         continue
 
@@ -130,27 +167,68 @@ class GPT(lmms):
             payload["max_tokens"] = gen_kwargs["max_new_tokens"]
             payload["temperature"] = gen_kwargs["temperature"]
 
-            response_text = ""  # Initialize response_text
+            retrieved_doc_ids = []
             for attempt in range(5):
                 try:
                     response_data = request_server(self, payload)
+                    
+                    # Check if response has expected structure
+                    if not isinstance(response_data, dict):
+                        raise ValueError(f"Invalid response format: expected dict, got {type(response_data)}")
+                    
+                    if "choices" not in response_data:
+                        raise ValueError(f"Response missing 'choices' field. Response: {response_data}")
+                    
+                    if not response_data["choices"] or len(response_data["choices"]) == 0:
+                        raise ValueError(f"Empty choices in response: {response_data}")
+                    
                     response_text = response_data["choices"][0]["message"]["content"].strip()
+                    
+                    # Capture doc_ids from response if available - check multiple possible locations
+                    if "doc_ids" in response_data:
+                        retrieved_doc_ids = response_data["doc_ids"]
+                    elif "retrieved_doc_ids" in response_data:
+                        retrieved_doc_ids = response_data["retrieved_doc_ids"]
+                    elif "metadata" in response_data and "doc_ids" in response_data["metadata"]:
+                        retrieved_doc_ids = response_data["metadata"]["doc_ids"]
+                    elif "usage" in response_data and "doc_ids" in response_data["usage"]:
+                        retrieved_doc_ids = response_data["usage"]["doc_ids"]
+                    else:
+                        # Look for doc_ids in choices
+                        if "choices" in response_data and len(response_data["choices"]) > 0:
+                            choice = response_data["choices"][0]
+                            if "doc_ids" in choice:
+                                retrieved_doc_ids = choice["doc_ids"]
+                            elif "message" in choice and "doc_ids" in choice["message"]:
+                                retrieved_doc_ids = choice["message"]["doc_ids"]
+                    
                     break
 
                 except Exception as e:
-                    eval_logger.info(f"Attempt {attempt + 1} failed with error: {str(e)}.\nResponse: {response_data if 'response_data' in locals() else 'No response'}")
-                    if attempt < 4:  # 0, 1, 2, 3 (first 4 attempts)
+                    error_msg = response_data if 'response_data' in locals() else "No response data"
+                    
+                    eval_logger.info(f"Attempt {attempt + 1} failed with error: {str(e)}.\nResponse: {error_msg}")
+                    if attempt < 4:  # Changed from <= 5 to < 4 for correct retry logic
                         time.sleep(NUM_SECONDS_TO_SLEEP)
                     else:
-                        eval_logger.error(f"All 5 attempts failed. Last error message: {str(e)}.")
+                        eval_logger.error(f"All 5 attempts failed. Last error message: {str(e)}.\nResponse: {error_msg}")
                         response_text = ""
 
-            res.append(response_text)
+            # Create response string with embedded doc_ids
+            if retrieved_doc_ids:
+                response_with_metadata = ResponseWithDocIds(response_text, retrieved_doc_ids)
+                res.append(response_with_metadata)
+            else:
+                res.append(response_text)
             pbar.update(1)
 
             if self.continual_mode is True:
                 doc_uuid = f"{task}___{split}___{doc_id}"
-                self.response_cache[doc_uuid] = response_text
+                # Cache the response - store as dict for JSON serialization
+                if retrieved_doc_ids:
+                    self.response_cache[doc_uuid] = {"text": response_text, "doc_ids": retrieved_doc_ids}
+                else:
+                    self.response_cache[doc_uuid] = response_text
                 with open(self.response_persistent_file, "w") as f:
                     json.dump(self.response_cache, f)
 
