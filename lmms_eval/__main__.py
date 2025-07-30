@@ -336,7 +336,7 @@ def cli_evaluate(args: Union[argparse.Namespace, None] = None) -> None:
             if is_main_process and args.wandb_args:
                 try:
                     wandb_logger.post_init(results)
-                    wandb_logger.log_eval_result()
+                    wandb_logger.log_eval_result(samples)
                     if args.wandb_log_samples and samples is not None:
                         wandb_logger.log_eval_samples(samples)
                 except Exception as e:
@@ -501,10 +501,9 @@ def cli_evaluate_single(args: Union[argparse.Namespace, None] = None) -> None:
     )
 
     if results is not None:
-        if args.log_samples:
-            samples = results.pop("samples")
-        else:
-            samples = None
+        # Always extract samples for wandb qa_samples table, even if not logging to files
+        samples = results.pop("samples", None)
+        
         dumped = json.dumps(results, indent=4, default=_handle_non_serializable)
         if args.show_config:
             print(dumped)
@@ -513,9 +512,10 @@ def cli_evaluate_single(args: Union[argparse.Namespace, None] = None) -> None:
 
         evaluation_tracker.save_results_aggregated(results=results, samples=samples if args.log_samples else None, datetime_str=datetime_str)
 
-        if args.log_samples:
+        if args.log_samples and samples:
             for task_name, config in results["configs"].items():
-                evaluation_tracker.save_results_samples(task_name=task_name, samples=samples[task_name])
+                if task_name in samples:
+                    evaluation_tracker.save_results_samples(task_name=task_name, samples=samples[task_name])
 
         if evaluation_tracker.push_results_to_hub or evaluation_tracker.push_samples_to_hub:
             evaluation_tracker.recreate_metadata_card()
