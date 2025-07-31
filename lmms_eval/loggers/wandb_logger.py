@@ -266,22 +266,28 @@ class WandbLogger:
         ids = [x.get("doc_id", i) for i, x in enumerate(data)]
         targets = [str(x.get("target", "")) for x in data]
         
-        # Extract questions and context
+        # Extract questions
         questions = []
-        context = []
         generated_answers = []
         expected_answers = []
         
         for x in data:
-            # Try to extract question from various possible locations
+            # Try to extract question - prioritize prompt content
             question = x.get("question", "")
+            
+            # Try to get prompt from doc.prompt first
+            if not question and "doc" in x and isinstance(x["doc"], dict):
+                question = x["doc"].get("prompt", "")
+            
+            # Try to get from input field
+            if not question:
+                question = x.get("input", "")
+            
+            # Fallback to arguments extraction
             if not question and "arguments" in x and x["arguments"]:
                 question = str(x["arguments"][0][0]) if len(x["arguments"][0]) > 0 else ""
-            questions.append(question[:500])  # Truncate for readability
             
-            # Extract context
-            ctx = x.get("context", x.get("doc", ""))
-            context.append(str(ctx)[:500])  # Truncate for readability
+            questions.append(question)
             
             # Extract generated answers
             generated_answer = x.get("generated_answer", "")
@@ -290,17 +296,16 @@ class WandbLogger:
                     generated_answer = str(x["resps"][0][0])
                 else:
                     generated_answer = str(x["resps"][0])
-            generated_answers.append(generated_answer[:500])
+            generated_answers.append(generated_answer)
             
             # Extract expected answers
             expected_answer = x.get("expected_answer", x.get("target", ""))
-            expected_answers.append(str(expected_answer)[:500])
+            expected_answers.append(str(expected_answer))
         
         # Create comprehensive dataframe
         df_data = {
             "doc_id": ids,
             "question": questions,
-            "context": context,
             "generated_answer": generated_answers,
             "expected_answer": expected_answers,
             "target": targets,
@@ -331,9 +336,9 @@ class WandbLogger:
             df_data[metric_name] = metric_values
         
         # Add raw data for debugging
-        df_data["raw_arguments"] = [str(x.get("arguments", ""))[:200] for x in data]
-        df_data["raw_resps"] = [str(x.get("resps", ""))[:200] for x in data]
-        df_data["filtered_resps"] = [str(x.get("filtered_resps", ""))[:200] for x in data]
+        df_data["raw_arguments"] = [str(x.get("arguments", "")) for x in data]
+        df_data["raw_resps"] = [str(x.get("resps", "")) for x in data]
+        df_data["filtered_resps"] = [str(x.get("filtered_resps", "")) for x in data]
 
         return pd.DataFrame(df_data)
 
@@ -368,8 +373,7 @@ class WandbLogger:
             "Question",
             "Generated_Answer",
             "Expected_Answer",
-            "Is_Correct",
-            "Context"
+            "Is_Correct"
         ]
         
         qa_table = wandb.Table(columns=qa_columns)
@@ -385,8 +389,18 @@ class WandbLogger:
                 
             # Process all samples
             for i, sample in enumerate(task_samples):
-                # Extract question
+                # Extract question - prioritize prompt content
                 question = sample.get("question", "")
+                
+                # Try to get prompt from doc.prompt first
+                if not question and "doc" in sample and isinstance(sample["doc"], dict):
+                    question = sample["doc"].get("prompt", "")
+                
+                # Try to get from input field
+                if not question:
+                    question = sample.get("input", "")
+                
+                # Fallback to arguments extraction
                 if not question and "arguments" in sample and sample["arguments"]:
                     try:
                         if isinstance(sample["arguments"], list) and len(sample["arguments"]) > 0:
@@ -414,11 +428,6 @@ class WandbLogger:
                 # Extract expected answer
                 expected_answer = sample.get("expected_answer", sample.get("target", ""))
                 
-                # Extract context
-                context = sample.get("context", sample.get("doc", ""))
-                if isinstance(context, dict):
-                    context = str(context.get("text", context))
-                
                 # Check correctness - compare generated and expected answers
                 is_correct = False
                 if generated_answer and expected_answer:
@@ -445,7 +454,6 @@ class WandbLogger:
                 question_str = str(question) if question else "No question"
                 generated_str = str(generated_answer) if generated_answer else "No answer"
                 expected_str = str(expected_answer) if expected_answer else "No target"
-                context_str = str(context) if context else "No context"
                 
                 # Only log doc_id issues for debugging
                 if raw_doc_id is None or not str(raw_doc_id).strip():
@@ -458,8 +466,7 @@ class WandbLogger:
                     question_str,
                     generated_str,
                     expected_str,
-                    bool(is_correct),
-                    context_str
+                    bool(is_correct)
                 )
                 total_rows_added += 1
         
