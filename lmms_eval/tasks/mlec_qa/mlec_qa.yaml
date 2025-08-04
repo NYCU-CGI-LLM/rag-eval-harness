@@ -1,6 +1,6 @@
 dataset_path: json
 dataset_kwargs:
-  data_files: dataset/mlec-qa/TCM_test.json
+  data_files: lmms_eval/tasks/mlec_qa/dataset/TCM_test.json
 task: mlec_qa
 test_split: train
 output_type: generate_until
