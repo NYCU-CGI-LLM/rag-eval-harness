@@ -269,6 +269,7 @@ class WandbLogger:
         # Extract questions
         questions = []
         generated_answers = []
+        filtered_answers = []
         expected_answers = []
         
         for x in data:
@@ -298,6 +299,23 @@ class WandbLogger:
                     generated_answer = str(x["resps"][0])
             generated_answers.append(generated_answer)
             
+            # Extract filtered answers from CoT filtering
+            filtered_answer = x.get("filtered_answer", "")
+            
+            # Try to get filtered answer from cot_info if available
+            if not filtered_answer and "cot_info" in x and isinstance(x["cot_info"], dict):
+                filtered_answer = x["cot_info"].get("filtered_response", "")
+            
+            # Check for other possible filtered response fields
+            if not filtered_answer:
+                filtered_answer = x.get("filtered_response", "")
+            
+            # If no filtered answer found, use the generated answer as fallback
+            if not filtered_answer:
+                filtered_answer = generated_answer
+                
+            filtered_answers.append(filtered_answer)
+            
             # Extract expected answers
             expected_answer = x.get("expected_answer", x.get("target", ""))
             expected_answers.append(str(expected_answer))
@@ -307,6 +325,7 @@ class WandbLogger:
             "doc_id": ids,
             "question": questions,
             "generated_answer": generated_answers,
+            "filtered_answer": filtered_answers,
             "expected_answer": expected_answers,
             "target": targets,
             "output_type": config.get("output_type", "unknown")
@@ -372,6 +391,7 @@ class WandbLogger:
             "Doc_ID", 
             "Question",
             "Generated_Answer",
+            "Filtered_Answer",
             "Expected_Answer",
             "Is_Correct"
         ]
@@ -425,23 +445,38 @@ class WandbLogger:
                         logger.warning(f"Error extracting generated_answer: {e}")
                         generated_answer = ""
                 
+                # Extract filtered answer from CoT filtering
+                filtered_answer = sample.get("filtered_answer", "")
+                
+                # Try to get filtered answer from cot_info if available
+                if not filtered_answer and "cot_info" in sample and isinstance(sample["cot_info"], dict):
+                    filtered_answer = sample["cot_info"].get("filtered_response", "")
+                
+                # Check for other possible filtered response fields
+                if not filtered_answer:
+                    filtered_answer = sample.get("filtered_response", "")
+                
+                # If no filtered answer found, use the generated answer as fallback
+                if not filtered_answer:
+                    filtered_answer = generated_answer
+                
                 # Extract expected answer
                 expected_answer = sample.get("expected_answer", sample.get("target", ""))
                 
-                # Check correctness - compare generated and expected answers
+                # Check correctness - compare filtered answer and expected answers (more accurate)
                 is_correct = False
-                if generated_answer and expected_answer:
+                if filtered_answer and expected_answer:
                     # Simple string comparison (case-insensitive, stripped)
-                    gen_clean = str(generated_answer).strip().lower()
+                    filtered_clean = str(filtered_answer).strip().lower()
                     exp_clean = str(expected_answer).strip().lower()
-                    is_correct = gen_clean == exp_clean
+                    is_correct = filtered_clean == exp_clean
                     
                     # For multiple choice, also check if the answer is contained
-                    if not is_correct and len(gen_clean) == 1 and len(exp_clean) == 1:
-                        is_correct = gen_clean == exp_clean
+                    if not is_correct and len(filtered_clean) == 1 and len(exp_clean) == 1:
+                        is_correct = filtered_clean == exp_clean
                     elif not is_correct:
-                        # Check if expected answer is contained in generated answer
-                        is_correct = exp_clean in gen_clean or gen_clean in exp_clean
+                        # Check if expected answer is contained in filtered answer
+                        is_correct = exp_clean in filtered_clean or filtered_clean in exp_clean
                 
                 # Also check exact_match from sample if available
                 if "exact_match" in sample:
@@ -453,6 +488,7 @@ class WandbLogger:
                 doc_id = raw_doc_id if raw_doc_id is not None and str(raw_doc_id).strip() else f"{task_name}_{i}"
                 question_str = str(question) if question else "No question"
                 generated_str = str(generated_answer) if generated_answer else "No answer"
+                filtered_str = str(filtered_answer) if filtered_answer else "No filtered answer"
                 expected_str = str(expected_answer) if expected_answer else "No target"
                 
                 # Only log doc_id issues for debugging
@@ -465,6 +501,7 @@ class WandbLogger:
                     str(doc_id),
                     question_str,
                     generated_str,
+                    filtered_str,
                     expected_str,
                     bool(is_correct)
                 )
