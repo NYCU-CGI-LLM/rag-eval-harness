@@ -273,16 +273,16 @@ class WandbLogger:
         expected_answers = []
         
         for x in data:
-            # Try to extract question - prioritize prompt content
+            # Try to extract question - prioritize complete input over raw prompt
             question = x.get("question", "")
             
-            # Try to get prompt from doc.prompt first
-            if not question and "doc" in x and isinstance(x["doc"], dict):
-                question = x["doc"].get("prompt", "")
-            
-            # Try to get from input field
+            # Prioritize input field (includes post_prompt) over raw doc.prompt
             if not question:
                 question = x.get("input", "")
+            
+            # Fallback to get prompt from doc.prompt 
+            if not question and "doc" in x and isinstance(x["doc"], dict):
+                question = x["doc"].get("prompt", "")
             
             # Fallback to arguments extraction
             if not question and "arguments" in x and x["arguments"]:
@@ -409,16 +409,16 @@ class WandbLogger:
                 
             # Process all samples
             for i, sample in enumerate(task_samples):
-                # Extract question - prioritize prompt content
+                # Extract question - prioritize complete input over raw prompt
                 question = sample.get("question", "")
                 
-                # Try to get prompt from doc.prompt first
-                if not question and "doc" in sample and isinstance(sample["doc"], dict):
-                    question = sample["doc"].get("prompt", "")
-                
-                # Try to get from input field
+                # Prioritize input field (includes post_prompt) over raw doc.prompt
                 if not question:
                     question = sample.get("input", "")
+                
+                # Fallback to get prompt from doc.prompt
+                if not question and "doc" in sample and isinstance(sample["doc"], dict):
+                    question = sample["doc"].get("prompt", "")
                 
                 # Fallback to arguments extraction
                 if not question and "arguments" in sample and sample["arguments"]:
