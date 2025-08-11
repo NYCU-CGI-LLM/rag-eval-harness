@@ -263,7 +263,6 @@ class WandbLogger:
             pd.DataFrame: A dataframe that is ready to be uploaded to W&B with complete information.
         """
         # Extract basic information
-        ids = [x.get("doc_id", i) for i, x in enumerate(data)]
         targets = [str(x.get("target", "")) for x in data]
         
         # Extract questions
@@ -320,14 +319,52 @@ class WandbLogger:
             expected_answer = x.get("expected_answer", x.get("target", ""))
             expected_answers.append(str(expected_answer))
         
+        # Extract retrieved_doc_ids and expected_doc_ids information
+        retrieved_doc_ids_list = []
+        expected_doc_ids_list = []
+        hit_rates_list = []
+        
+        for x in data:
+            retrieved_doc_ids = []
+            expected_doc_id = ""
+            hit_rate = False
+            
+            # Try to get retrieved doc_ids from hit_rate info first
+            if "hit_rate" in x and isinstance(x["hit_rate"], dict):
+                hit_rate_info = x["hit_rate"]
+                retrieved_doc_ids = hit_rate_info.get("retrieved_doc_ids", [])
+                expected_doc_id = hit_rate_info.get("expected_doc_id", "")
+                hit_rate = hit_rate_info.get("hit", False)
+            
+            # Fallback: try to get doc_ids from resps if available
+            if not retrieved_doc_ids and "resps" in x and x["resps"]:
+                try:
+                    resp = x["resps"][0]
+                    if hasattr(resp, 'doc_ids'):
+                        retrieved_doc_ids = resp.doc_ids
+                    elif isinstance(resp, dict) and "doc_ids" in resp:
+                        retrieved_doc_ids = resp["doc_ids"]
+                except (IndexError, AttributeError):
+                    pass
+            
+            # Get expected_doc_id from doc if not found in hit_rate
+            if not expected_doc_id and "doc" in x and isinstance(x["doc"], dict):
+                expected_doc_id = x["doc"].get("expected_doc_id", "")
+            
+            retrieved_doc_ids_list.append(str(retrieved_doc_ids) if retrieved_doc_ids else "[]")
+            expected_doc_ids_list.append(str(expected_doc_id))
+            hit_rates_list.append(bool(hit_rate))
+        
         # Create comprehensive dataframe
         df_data = {
-            "doc_id": ids,
             "question": questions,
             "generated_answer": generated_answers,
             "filtered_answer": filtered_answers,
             "expected_answer": expected_answers,
             "target": targets,
+            "retrieved_doc_ids": retrieved_doc_ids_list,
+            "expected_doc_id": expected_doc_ids_list,
+            "hit_rate": hit_rates_list,
             "output_type": config.get("output_type", "unknown")
         }
         
@@ -385,14 +422,16 @@ class WandbLogger:
             logger.warning("Samples is None or empty!")
             return
         
-        # Create table specifically for Q&A traceability with correctness
+        # Create table specifically for Q&A traceability with correctness and retrieved doc_ids
         qa_columns = [
             "Task",
-            "Doc_ID", 
             "Question",
             "Generated_Answer",
             "Filtered_Answer",
             "Expected_Answer",
+            "Retrieved_Doc_IDs",
+            "Expected_Doc_ID",
+            "Hit_Rate",
             "Is_Correct"
         ]
         
@@ -463,6 +502,33 @@ class WandbLogger:
                 # Extract expected answer
                 expected_answer = sample.get("expected_answer", sample.get("target", ""))
                 
+                # Extract retrieved doc_ids from API response or hit_rate information
+                retrieved_doc_ids = []
+                expected_doc_id = ""
+                hit_rate = False
+                
+                # Try to get retrieved doc_ids from hit_rate info first
+                if "hit_rate" in sample and isinstance(sample["hit_rate"], dict):
+                    hit_rate_info = sample["hit_rate"]
+                    retrieved_doc_ids = hit_rate_info.get("retrieved_doc_ids", [])
+                    expected_doc_id = hit_rate_info.get("expected_doc_id", "")
+                    hit_rate = hit_rate_info.get("hit", False)
+                
+                # Fallback: try to get doc_ids from resps if available  
+                if not retrieved_doc_ids and "resps" in sample and sample["resps"]:
+                    try:
+                        resp = sample["resps"][0]
+                        if hasattr(resp, 'doc_ids'):
+                            retrieved_doc_ids = resp.doc_ids
+                        elif isinstance(resp, dict) and "doc_ids" in resp:
+                            retrieved_doc_ids = resp["doc_ids"]
+                    except (IndexError, AttributeError):
+                        pass
+                
+                # Get expected_doc_id from doc if not found in hit_rate
+                if not expected_doc_id and "doc" in sample and isinstance(sample["doc"], dict):
+                    expected_doc_id = sample["doc"].get("expected_doc_id", "")
+                
                 # Check correctness - compare filtered answer and expected answers (more accurate)
                 is_correct = False
                 if filtered_answer and expected_answer:
@@ -482,27 +548,25 @@ class WandbLogger:
                 if "exact_match" in sample:
                     is_correct = bool(sample["exact_match"])
                 
-                # Ensure all data is valid strings and not None - no truncation
-                raw_doc_id = sample.get("doc_id")
-
-                doc_id = raw_doc_id if raw_doc_id is not None and str(raw_doc_id).strip() else f"{task_name}_{i}"
                 question_str = str(question) if question else "No question"
                 generated_str = str(generated_answer) if generated_answer else "No answer"
                 filtered_str = str(filtered_answer) if filtered_answer else "No filtered answer"
                 expected_str = str(expected_answer) if expected_answer else "No target"
                 
-                # Only log doc_id issues for debugging
-                if raw_doc_id is None or not str(raw_doc_id).strip():
-                    logger.warning(f"Sample {i} has empty doc_id: {raw_doc_id}, using fallback: {doc_id}")
+                # Format retrieved_doc_ids and expected_doc_id for display
+                retrieved_doc_ids_str = str(retrieved_doc_ids) if retrieved_doc_ids else "[]"
+                expected_doc_id_str = str(expected_doc_id) if expected_doc_id else ""
                 
-                # Add to table with full content (no truncation)
+                # Add to table with full content (no truncation) including doc_ids info
                 qa_table.add_data(
                     str(task_name),
-                    str(doc_id),
                     question_str,
                     generated_str,
                     filtered_str,
                     expected_str,
+                    retrieved_doc_ids_str,
+                    expected_doc_id_str,
+                    bool(hit_rate),
                     bool(is_correct)
                 )
                 total_rows_added += 1

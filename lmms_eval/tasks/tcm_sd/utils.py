@@ -6,8 +6,6 @@ from collections import defaultdict
 import numpy as np
 from loguru import logger as eval_logger
 
-MULTI_CHOICE_PROMPT = "请只回答选项字母（如：A）。"
-DIRECT_PROMPT = "请直接回答证候名称，不需要解释。"
 
 # CoT filtering keywords for Chinese TCM responses
 TCM_ANSWER_INDICATORS = [
@@ -45,29 +43,45 @@ def filter_cot_response(response, answer_type="direct"):
     original_response = response
     response = response.strip()
     
-    # Strategy 1: Look for structured answer patterns
+    # Strategy 1: Enhanced quote extraction - look for answers in quotes first
+    quote_patterns = [
+        # Various quote styles with TCM syndrome names - include all Unicode quote types
+        r'[""\u201c\u201d''""]([^""\u201c\u201d''""\n]{2,15}证)[""\u201c\u201d''""]',  # TCM syndromes in quotes
+        r'[""\u201c\u201d''""]([^""\u201c\u201d''""\n]{2,20})[""\u201c\u201d''""](?:[。．，,\s]*$)',  # General quoted answers at end
+        r'最符合的.*?[：:：]?\s*[""\u201c\u201d''""]([^""\u201c\u201d''""\n]{2,15}证)[""\u201c\u201d''""]',  # TCM specific with quotes
+        # Also try simple patterns for the specific case
+        r'"([^"\n]{2,15}证)"',  # Simple double quotes
+        r'"([^"\n]{2,15}证)"',  # Curly double quotes  
+    ]
+    
+    for pattern in quote_patterns:
+        matches = re.findall(pattern, response, re.IGNORECASE | re.MULTILINE)
+        if matches:
+            # Take the last match (most likely to be the final answer)
+            extracted = matches[-1].strip()
+            if extracted and len(extracted) <= 20 and '证' in extracted:
+                return extracted
+    
+    # Strategy 2: Look for structured answer patterns
     # Handle "Answer:" patterns and TCM-specific patterns
     answer_patterns = [
-        # Basic answer patterns
-        r'答案[：:]\s*(.+?)(?:\n|$)',
-        r'诊断[：:]\s*(.+?)(?:\n|$)', 
-        r'证候[：:]\s*(.+?)(?:\n|$)',
-        r'结论[：:]\s*(.+?)(?:\n|$)',
-        r'answer[：:]\s*(.+?)(?:\n|$)',
-        r'diagnosis[：:]\s*(.+?)(?:\n|$)',
+        # Basic answer patterns - more specific
+        r'答案[：:]\s*([^。\n]{2,15}证)(?:[。．\n]|$)',
+        r'诊断[：:]\s*([^。\n]{2,15}证)(?:[。．\n]|$)', 
+        r'证候[：:]\s*([^。\n]{2,15}证)(?:[。．\n]|$)',
+        r'结论[：:]\s*([^。\n]{2,15}证)(?:[。．\n]|$)',
         
-        # TCM-specific patterns
-        r'证候名称[：:]\s*(.+?)(?:\n|$)',
-        r'证候名称为[：:]?\s*(.+?)(?:\n|$)',
-        r'最符合的.*?证候.*?为[：:]?\s*["""]?(.+?)["""]?(?:[。．\n]|$)',
-        r'最符合的.*?证候[：:]?\s*["""]?(.+?)["""]?(?:[。．\n]|$)',
-        r'证候名称为[：:]?\s*["""]?(.+?)["""]?(?:[。．\n]|$)',
+        # TCM-specific patterns - more precise
+        r'证候名称[为]?[：:]?\s*([^。\n]{2,15}证)(?:[。．\n]|$)',
+        r'最符合的.*?证候.*?[为是][：:]?\s*([^。\n]{2,15}证)',
+        r'最符合的.*?证候[：:]?\s*([^。\n]{2,15}证)',
+        r'证候.*?为[：:]?\s*([^。\n]{2,15}证)',
         
-        # Pattern for quoted answers
-        r'["""]([^"""]+)["""](?:[。．]?$)',
+        # Bold/asterisk patterns
+        r'\*\*([^*\n]{2,15}证)\*\*',
         
-        # Pattern for answers ending with period
-        r'(?:因此|所以|综上|最终|最后).*?[：:]?\s*(.+?)(?:[。．]|$)',
+        # Final conclusion patterns
+        r'(?:因此|所以|综上|最终|最后).*?[：:]?\s*([^。\n]{2,15}证)(?:[。．]|$)',
     ]
     
     for pattern in answer_patterns:
@@ -79,61 +93,78 @@ def filter_cot_response(response, answer_type="direct"):
             extracted = re.sub(r'^[：:：，,。．\s]+', '', extracted)
             extracted = re.sub(r'[。．\s]+$', '', extracted)
             # Remove asterisks and formatting
-            extracted = re.sub(r'\*+', '', extracted)
-            if extracted and not extracted.isspace() and len(extracted) <= 50:
+            extracted = re.sub(r'[\*\*]+', '', extracted)
+            if extracted and not extracted.isspace() and len(extracted) <= 20 and '证' in extracted:
                 return extracted
     
-    # Strategy 2: Keep the last answer pattern
-    # Find the last occurrence of key indicators
-    last_indicator_pos = -1
-    last_indicator = ""
+    # Strategy 3: Enhanced indicator-based extraction
+    # Find the last occurrence of key indicators, but be more selective
+    best_candidate = ""
+    best_score = 0
     
-    for indicator in TCM_ANSWER_INDICATORS:
+    # Look for key indicators in reverse order (last occurrence first)
+    key_indicators = ["最符合的", "证候为", "证候是", "诊断为", "诊断是", "结论", "综上", "因此", "最终"]
+    
+    for indicator in key_indicators:
         pos = response.lower().rfind(indicator.lower())
-        if pos > last_indicator_pos:
-            last_indicator_pos = pos
-            last_indicator = indicator
+        if pos != -1:
+            # Extract content after the indicator
+            after_indicator = response[pos + len(indicator):].strip()
+            
+            # Clean up common prefixes and separators
+            for sep in ["：", ":", "是", "为", "："]:
+                if after_indicator.startswith(sep):
+                    after_indicator = after_indicator[len(sep):].strip()
+                    break
+            
+            # Look for quoted content first - handle all Unicode quote types
+            quote_match = re.search(r'^[""\u201c\u201d''""]([^""\u201c\u201d''""\n]{2,15}证)[""\u201c\u201d''""]', after_indicator)
+            if quote_match:
+                candidate = quote_match.group(1).strip()
+                if len(candidate) <= 20 and '证' in candidate:
+                    return candidate
+            
+            # Look for TCM syndrome names in the first part
+            syndrome_match = re.search(r'^([^。\n]{2,15}证)', after_indicator)
+            if syndrome_match:
+                candidate = syndrome_match.group(1).strip()
+                # Clean up
+                candidate = re.sub(r'^[：:：，,。．\s]+', '', candidate)
+                candidate = re.sub(r'[。．，,\s]+$', '', candidate)
+                if len(candidate) <= 20 and '证' in candidate:
+                    # Score based on position and indicator quality
+                    score = pos + (100 if indicator in ["最符合的", "证候为", "诊断为"] else 50)
+                    if score > best_score:
+                        best_candidate = candidate
+                        best_score = score
     
-    if last_indicator_pos != -1:
-        # Extract content after the last indicator
-        after_indicator = response[last_indicator_pos + len(last_indicator):].strip()
-        
-        # Clean up common prefixes and separators
-        for sep in ["：", ":", "是", "为", "："]:
-            if after_indicator.startswith(sep):
-                after_indicator = after_indicator[len(sep):].strip()
-                break
-        
-        # Handle quoted content
-        quote_match = re.search(r'^["""]([^"""]+)["""]', after_indicator)
-        if quote_match:
-            answer_candidate = quote_match.group(1).strip()
-        else:
-            # Take the first line or sentence as the answer
-            lines = after_indicator.split('\n')
-            if lines:
-                answer_candidate = lines[0].strip()
-        
-        # Remove common suffixes that might be part of reasoning
-        for suffix in ["。", ".", "，", ",", "；", ";"]:
-            if answer_candidate.endswith(suffix):
-                answer_candidate = answer_candidate[:-len(suffix)]
-        
-        # Remove asterisks and formatting
-        answer_candidate = re.sub(r'\*+', '', answer_candidate)
-        answer_candidate = answer_candidate.strip()
-        
-        # Check if we have a reasonable answer length for TCM syndrome names
-        if answer_candidate and len(answer_candidate) > 0 and len(answer_candidate) <= 20:
-            return answer_candidate
+    if best_candidate:
+        return best_candidate
     
-    # Strategy 3: Trunk response - keep only last few words for direct answers
+    # Strategy 4: Look for TCM syndromes in the last part of response
     if answer_type == "direct":
+        # Look for any TCM syndrome names in the last few sentences
+        sentences = re.split(r'[。．！!？?]', response)
+        for sentence in reversed(sentences):
+            sentence = sentence.strip()
+            if sentence:
+                # Find syndrome names ending with 证
+                syndrome_match = re.search(r'([^。\n]{2,15}证)', sentence)
+                if syndrome_match:
+                    candidate = syndrome_match.group(1).strip()
+                    if len(candidate) <= 20:
+                        return candidate
+        
+        # If still no match, try last few words
         words = response.split()
-        if len(words) > 10:  # If response is too long, keep last few words
-            return " ".join(words[-5:])
+        if len(words) > 10:
+            # Look for syndrome in last 10 words
+            last_words = " ".join(words[-10:])
+            syndrome_match = re.search(r'([^。\n]{2,15}证)', last_words)
+            if syndrome_match:
+                return syndrome_match.group(1).strip()
     
-    # Strategy 4: For multiple choice, look for single letter answers at the end
+    # Strategy 5: For multiple choice, look for single letter answers at the end
     if answer_type == "multiple_choice":
         # Look for isolated letters (A, B, C, D, E) at the end
         lines = response.split('\n')
@@ -145,12 +176,16 @@ def filter_cot_response(response, answer_type="direct"):
                 if choice_match:
                     return choice_match.group(1)
     
-    # Strategy 5: Return the last non-empty line if it's short enough
+    # Strategy 6: Return the last non-empty line if it's short and contains 证
     lines = [line.strip() for line in response.split('\n') if line.strip()]
     if lines:
-        last_line = lines[-1]
-        if len(last_line) <= 50:  # Reasonable answer length
-            return last_line
+        for line in reversed(lines):
+            if len(line) <= 20 and '证' in line:
+                # Clean up the line
+                line = re.sub(r'^[：:：，,。．\s]+', '', line)
+                line = re.sub(r'[。．，,\s]+$', '', line)
+                if line:
+                    return line
     
     # Fallback: return original response
     return original_response
